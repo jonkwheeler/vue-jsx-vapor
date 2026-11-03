@@ -1,11 +1,14 @@
 import { walkIdentifiers } from 'ast-kit'
 import { restructure } from '../restructure'
 import {
+  camelize,
   getDefaultValue,
   HELPER_PREFIX,
   importHelperFn,
   isFunctionalNode,
   prependFunctionalNode,
+  resolveObjectKey,
+  toStringLiteral,
   type FunctionalNode,
 } from '../utils'
 import { transformAwait } from './await'
@@ -43,8 +46,14 @@ export function transformDefineComponent(
     } else if (root.params[0].type === 'ObjectPattern') {
       const restructuredProps = root.params[0]
       for (const prop of restructuredProps.properties) {
-        if (prop.type !== 'ObjectProperty' || prop.key.type !== 'Identifier') continue
-        const propName = prop.key.name
+        if (prop.type !== 'ObjectProperty') continue
+        const key = resolveObjectKey(prop.key, prop.computed)
+        if (key === undefined) {
+          throw new SyntaxError(
+            `[vue-jsx] Destructured props cannot use a computed key: [${s.slice(prop.key.start!, prop.key.end!)}]`,
+          )
+        }
+        const propName = camelize(key)
         if (prop.value.type !== 'AssignmentPattern') {
           props[propName] = null
           continue
@@ -77,6 +86,7 @@ export function transformDefineComponent(
 
       restructure(s, root, {
         skipDefaultProps: true,
+        camelizeKeys: true,
         generateRestProps: (restPropsName, index, list) => {
           if (index === list.length - 1) {
             hasRestProp = true
@@ -91,7 +101,7 @@ export function transformDefineComponent(
   transformDefineModel(s, macros.defineModel, props)
 
   const propsString = Object.entries(props)
-    .map(([key, value]) => `'${key}': ${value}`)
+    .map(([key, value]) => `${toStringLiteral(key)}: ${value}`)
     .join(', \n')
   if (propsString || hasRestProp) {
     const resolvedPropsString = `${hasRestProp ? 'inheritAttrs: false, ' : ''}${propsString ? `props: {\n${propsString}\n}, ` : ''}`
